@@ -1,19 +1,52 @@
 import Foundation
 import Metal
 import MetalKit
+import simd
+
+struct Uniforms {
+    var modelViewMatrix: float4x4
+    var projectionMatrix: float4x4
+}
 
 class Renderer: NSObject, MTKViewDelegate  {
 
     private let mtkView: MTKView
     private let device: MTLDevice
+    private let commandQueue: MTLCommandQueue
     private var vertexDescriptor: MTLVertexDescriptor!
     private var meshes: [MTKMesh] = []
+    private var renderPipeline: MTLRenderPipelineState!
 
     init(view: MTKView){
         self.mtkView = view
         self.device = view.device!
+        self.commandQueue = device.makeCommandQueue()!
         super.init()
         loadResources()
+        buildPipeline()
+    }
+
+    private func buildPipeline() {
+        // get library (collection of shader functions) from main bundle.
+        // Shaders are defined in Shaders.metal
+        guard let library = device.makeDefaultLibrary() else {
+            fatalError("Could not load default library from main bundle")
+        }
+
+        let pipelineDescriptor = MTLRenderPipelineDescriptor()
+        pipelineDescriptor.vertexFunction = library.makeFunction(name: "vertex_main")
+        pipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragment_main")
+        // tell Metal the format (pixel layout) of the textures we will be drawing to
+        pipelineDescriptor.colorAttachments[0].pixelFormat = mtkView.colorPixelFormat
+        pipelineDescriptor.vertexDescriptor = vertexDescriptor
+
+        // Compile shaders, so they will run on GPU
+        do {
+            renderPipeline = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+        }
+        catch {
+            fatalError("Could not create render pipeline state: \(error)")
+        }
     }
 
     private func loadResources() {
@@ -41,5 +74,55 @@ class Renderer: NSObject, MTKViewDelegate  {
 
     func draw(in view: MTKView) {
 
+        let modelMatrix = float4x4(rotationAbout: float3(0, 1, 0), by: -Float.pi / 6)
+        // describes camera position
+        let viewMatrix = float4x4(translationBy: float3(0, -1, -10))
+        let modelViewMatrix = viewMatrix * modelMatrix
+        let aspectRatio = Float(view.drawableSize.width / view.drawableSize.height)
+        // Anything nearer than .1 units and further away than 100 units will bel clipped (not visible)
+        let projectionMatrix = float4x4(perspectiveProjectionFov: Float.pi / 3, aspectRatio: aspectRatio, nearZ: 0.1, farZ: 100)
+
+        var uniforms = Uniforms(modelViewMatrix: modelViewMatrix, projectionMatrix: projectionMatrix)
+
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            return
+        }
+        // tells Metal which textures we will actually be drawing to.
+        if let renderPassDescriptor = view.currentRenderPassDescriptor,
+            let drawable = view.currentDrawable,
+            let commandEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
+
+            commandEncoder.setRenderPipelineState(renderPipeline)
+
+            commandEncoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+
+            for mesh in meshes {
+                guard let vertexBuffer = mesh.vertexBuffers.first else {
+                    continue
+                }
+                commandEncoder.setVertexBuffer(vertexBuffer.buffer, offset: vertexBuffer.offset, index: 0)
+
+                for submesh in mesh.submeshes {
+                    commandEncoder.draw(submesh: submesh)
+                }
+            }
+            // tell encoder we will not be drawing any more things
+            commandEncoder.endEncoding()
+            // callback to present the result
+            commandBuffer.present(drawable)
+            // ship commands to GPU
+            commandBuffer.commit()
+        }
+    }
+}
+
+extension MTLRenderCommandEncoder {
+    // tells Metal to render a sequence of primitivies (shapes)
+    func draw(submesh: MTKSubmesh) {
+        self.drawIndexedPrimitives(type: submesh.primitiveType, // triangle, line, point etc
+                indexCount: submesh.indexCount,
+                indexType: submesh.indexType,
+                indexBuffer: submesh.indexBuffer.buffer,
+                indexBufferOffset: submesh.indexBuffer.offset)
     }
 }
