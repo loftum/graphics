@@ -2,6 +2,9 @@
 <Workspace
    version = "1.0">
    <FileRef
+      location = "group:Teapot/Teapot.xcodeproj">
+   </FileRef>
+   <FileRef
       location = "group:Triangle/Triangle.xcodeproj">
    </FileRef>
 </Workspace>
