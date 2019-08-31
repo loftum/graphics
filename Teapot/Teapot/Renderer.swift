@@ -13,20 +13,22 @@ class Renderer: NSObject, MTKViewDelegate  {
     private let mtkView: MTKView
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
-    private var vertexDescriptor: MTLVertexDescriptor!
+    private let vertexDescriptor: MDLVertexDescriptor
+    private let renderPipeline: MTLRenderPipelineState
     private var meshes: [MTKMesh] = []
-    private var renderPipeline: MTLRenderPipelineState!
+    var time: Float = 0
 
     init(view: MTKView){
         self.mtkView = view
         self.device = view.device!
         self.commandQueue = device.makeCommandQueue()!
+        vertexDescriptor = Renderer.createVertexDescriptor()
+        renderPipeline = Renderer.buildPipeline(device: device, view: view, vertexDescriptor: vertexDescriptor)
+        meshes = Renderer.loadResources(device: device, vertexDescriptor: vertexDescriptor)
         super.init()
-        loadResources()
-        buildPipeline()
     }
 
-    private func buildPipeline() {
+    private static func buildPipeline(device: MTLDevice, view: MTKView, vertexDescriptor: MDLVertexDescriptor) -> MTLRenderPipelineState {
         // get library (collection of shader functions) from main bundle.
         // Shaders are defined in Shaders.metal
         guard let library = device.makeDefaultLibrary() else {
@@ -37,32 +39,35 @@ class Renderer: NSObject, MTKViewDelegate  {
         pipelineDescriptor.vertexFunction = library.makeFunction(name: "vertex_main")
         pipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragment_main")
         // tell Metal the format (pixel layout) of the textures we will be drawing to
-        pipelineDescriptor.colorAttachments[0].pixelFormat = mtkView.colorPixelFormat
-        pipelineDescriptor.vertexDescriptor = vertexDescriptor
+        pipelineDescriptor.colorAttachments[0].pixelFormat = view.colorPixelFormat
+        pipelineDescriptor.vertexDescriptor = MTKMetalVertexDescriptorFromModelIO(vertexDescriptor)
 
         // Compile shaders, so they will run on GPU
         do {
-            renderPipeline = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+            return try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
         }
         catch {
             fatalError("Could not create render pipeline state: \(error)")
         }
     }
 
-    private func loadResources() {
-        let modelURL = Bundle.main.url(forResource: "teapot", withExtension: "obj")
-
+    private static func createVertexDescriptor() -> MDLVertexDescriptor {
         let vertexDescriptor = MDLVertexDescriptor()
         vertexDescriptor.attributes[0] = MDLVertexAttribute(name: MDLVertexAttributePosition, format: .float3, offset: 0, bufferIndex: 0)
         vertexDescriptor.attributes[1] = MDLVertexAttribute(name: MDLVertexAttributeNormal, format: .float3, offset: MemoryLayout<Float>.size * 3, bufferIndex: 0)
         vertexDescriptor.attributes[2] = MDLVertexAttribute(name: MDLVertexAttributeTextureCoordinate, format: .float2, offset: MemoryLayout<Float>.size * 6, bufferIndex: 0)
         vertexDescriptor.layouts[0] = MDLVertexBufferLayout(stride: MemoryLayout<Float>.size * 8)
-        self.vertexDescriptor = MTKMetalVertexDescriptorFromModelIO(vertexDescriptor)!
+        return vertexDescriptor
+    }
+
+    private static func loadResources(device: MTLDevice, vertexDescriptor: MDLVertexDescriptor) -> [MTKMesh] {
+        let modelURL = Bundle.main.url(forResource: "teapot", withExtension: "obj")
 
         let bufferAllocator = MTKMeshBufferAllocator(device: device)
         let asset = MDLAsset(url: modelURL, vertexDescriptor: vertexDescriptor, bufferAllocator: bufferAllocator)
         do {
-            (_, meshes) = try MTKMesh.newMeshes(asset: asset, device: device)
+            let (_, meshes) = try MTKMesh.newMeshes(asset: asset, device: device)
+            return meshes
         } catch {
             fatalError("Could not extract meshes from Model I/O asset")
         }
@@ -74,9 +79,11 @@ class Renderer: NSObject, MTKViewDelegate  {
 
     func draw(in view: MTKView) {
 
-        let modelMatrix = float4x4(rotationAbout: float3(0, 1, 0), by: -Float.pi / 6)
+        time += 1 / Float(mtkView.preferredFramesPerSecond)
+        let angle = -time
+        let modelMatrix = float4x4(rotationAbout: float3(0, 1, 0), by: angle) *  float4x4(scaleBy: 0.1)
         // describes camera position
-        let viewMatrix = float4x4(translationBy: float3(0, -1, -10))
+        let viewMatrix = float4x4(translationBy: float3(0, 0, -2))
         let modelViewMatrix = viewMatrix * modelMatrix
         let aspectRatio = Float(view.drawableSize.width / view.drawableSize.height)
         // Anything nearer than .1 units and further away than 100 units will bel clipped (not visible)
