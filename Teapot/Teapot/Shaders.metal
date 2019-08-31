@@ -49,5 +49,7 @@ vertex VertexOut vertex_main(
 
 fragment float4 fragment_main(VertexOut fragmentIn [[stage_in]])
 {
-    return float4(1, 0, 0, 1);
+    //return float4(0, 1, 0, 1);
+    float3 normal = normalize(fragmentIn.eyeNormal.xyz);
+    return float4(abs(normal), 1);
 }
