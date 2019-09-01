@@ -4,8 +4,9 @@ import MetalKit
 import simd
 
 struct Uniforms {
-    var modelViewMatrix: float4x4
-    var projectionMatrix: float4x4
+    var modelMatrix: float4x4
+    var viewProjectionMatrix: float4x4
+    var normalMatrix: float3x3
 }
 
 class Renderer: NSObject, MTKViewDelegate  {
@@ -92,6 +93,19 @@ class Renderer: NSObject, MTKViewDelegate  {
 
     }
 
+    private static func createUniforms(view: MTKView, time: Float) -> Uniforms {
+        let angle = -time
+        let modelMatrix = float4x4(rotationAbout: float3(0, 1, 0), by: angle) *  float4x4(scaleBy: 2)
+        // describes camera position
+        let viewMatrix = float4x4(translationBy: float3(0, 0, -2))
+
+        let aspectRatio = Float(view.drawableSize.width / view.drawableSize.height)
+        // Anything nearer than .1 units and further away than 100 units will bel clipped (not visible)
+        let projectionMatrix = float4x4(perspectiveProjectionFov: Float.pi / 3, aspectRatio: aspectRatio, nearZ: 0.1, farZ: 100)
+        let viewProjectionMatrix = projectionMatrix * viewMatrix;
+        return Uniforms(modelMatrix: modelMatrix, viewProjectionMatrix: viewProjectionMatrix, normalMatrix: modelMatrix.normalMatrix)
+    }
+
     func draw(in view: MTKView) {
         time += 1 / Float(mtkView.preferredFramesPerSecond)
 
@@ -106,15 +120,7 @@ class Renderer: NSObject, MTKViewDelegate  {
             return
         }
 
-        let angle = -time
-        let modelMatrix = float4x4(rotationAbout: float3(0, 1, 0), by: angle) *  float4x4(scaleBy: 2)
-        // describes camera position
-        let viewMatrix = float4x4(translationBy: float3(0, 0, -2))
-        let modelViewMatrix = viewMatrix * modelMatrix
-        let aspectRatio = Float(view.drawableSize.width / view.drawableSize.height)
-        // Anything nearer than .1 units and further away than 100 units will bel clipped (not visible)
-        let projectionMatrix = float4x4(perspectiveProjectionFov: Float.pi / 3, aspectRatio: aspectRatio, nearZ: 0.1, farZ: 100)
-        var uniforms = Uniforms(modelViewMatrix: modelViewMatrix, projectionMatrix: projectionMatrix)
+        var uniforms = Renderer.createUniforms(view: view, time: time)
 
         commandEncoder.setRenderPipelineState(renderPipeline)
         commandEncoder.setDepthStencilState(depthStencilState)

@@ -44,4 +44,15 @@ extension float4x4 {
                 float4( 0,  0, zz, zw),
                 float4( 0,  0, wz,  1))
     }
+
+    var normalMatrix: float3x3 {
+        let upperLeft = float3x3(self[0].xyz, self[1].xyz, self[2].xyz)
+        return upperLeft.transpose.inverse
+    }
+}
+
+extension float4 {
+    var xyz: float3 {
+        return float3(x, y, z)
+    }
 }
