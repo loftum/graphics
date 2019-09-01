@@ -15,6 +15,7 @@ class Renderer: NSObject, MTKViewDelegate  {
     private let commandQueue: MTLCommandQueue
     private let vertexDescriptor: MDLVertexDescriptor
     private let renderPipeline: MTLRenderPipelineState
+    private let depthStencilState: MTLDepthStencilState
     private var meshes: [MTKMesh] = []
     var time: Float = 0
 
@@ -25,7 +26,20 @@ class Renderer: NSObject, MTKViewDelegate  {
         vertexDescriptor = Renderer.createVertexDescriptor()
         renderPipeline = Renderer.buildPipeline(device: device, view: view, vertexDescriptor: vertexDescriptor)
         meshes = Renderer.loadResources(device: device, vertexDescriptor: vertexDescriptor)
+        depthStencilState = Renderer.createDepthStencilState(device: device)
         super.init()
+    }
+
+
+    private static func createDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
+        let depthStencilDescriptor = MTLDepthStencilDescriptor()
+        // Keep fragments closest to the camera
+        depthStencilDescriptor.depthCompareFunction = .less
+        depthStencilDescriptor.isDepthWriteEnabled = true // or else it doesn't work
+        guard let state = device.makeDepthStencilState(descriptor: depthStencilDescriptor) else {
+            fatalError("Could not create depthStencilState")
+        }
+    return state
     }
 
     private static func buildPipeline(device: MTLDevice, view: MTKView, vertexDescriptor: MDLVertexDescriptor) -> MTLRenderPipelineState {
@@ -40,6 +54,7 @@ class Renderer: NSObject, MTKViewDelegate  {
         pipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragment_main")
         // tell Metal the format (pixel layout) of the textures we will be drawing to
         pipelineDescriptor.colorAttachments[0].pixelFormat = view.colorPixelFormat
+        pipelineDescriptor.depthAttachmentPixelFormat = view.depthStencilPixelFormat
         pipelineDescriptor.vertexDescriptor = MTKMetalVertexDescriptorFromModelIO(vertexDescriptor)
 
         // Compile shaders, so they will run on GPU
@@ -78,8 +93,19 @@ class Renderer: NSObject, MTKViewDelegate  {
     }
 
     func draw(in view: MTKView) {
-
         time += 1 / Float(mtkView.preferredFramesPerSecond)
+
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            return
+        }
+
+        // tells Metal which textures we will actually be drawing to.
+        guard let renderPassDescriptor = view.currentRenderPassDescriptor,
+            let drawable = view.currentDrawable,
+            let commandEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
+            return
+        }
+
         let angle = -time
         let modelMatrix = float4x4(rotationAbout: float3(0, 1, 0), by: angle) *  float4x4(scaleBy: 2)
         // describes camera position
@@ -88,38 +114,28 @@ class Renderer: NSObject, MTKViewDelegate  {
         let aspectRatio = Float(view.drawableSize.width / view.drawableSize.height)
         // Anything nearer than .1 units and further away than 100 units will bel clipped (not visible)
         let projectionMatrix = float4x4(perspectiveProjectionFov: Float.pi / 3, aspectRatio: aspectRatio, nearZ: 0.1, farZ: 100)
-
         var uniforms = Uniforms(modelViewMatrix: modelViewMatrix, projectionMatrix: projectionMatrix)
 
-        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
-            return
-        }
-        // tells Metal which textures we will actually be drawing to.
-        if let renderPassDescriptor = view.currentRenderPassDescriptor,
-            let drawable = view.currentDrawable,
-            let commandEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
+        commandEncoder.setRenderPipelineState(renderPipeline)
+        commandEncoder.setDepthStencilState(depthStencilState)
+        commandEncoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
 
-            commandEncoder.setRenderPipelineState(renderPipeline)
-
-            commandEncoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
-
-            for mesh in meshes {
-                guard let vertexBuffer = mesh.vertexBuffers.first else {
-                    continue
-                }
-                commandEncoder.setVertexBuffer(vertexBuffer.buffer, offset: vertexBuffer.offset, index: 0)
-
-                for submesh in mesh.submeshes {
-                    commandEncoder.draw(submesh: submesh)
-                }
+        for mesh in meshes {
+            guard let vertexBuffer = mesh.vertexBuffers.first else {
+                continue
             }
-            // tell encoder we will not be drawing any more things
-            commandEncoder.endEncoding()
-            // callback to present the result
-            commandBuffer.present(drawable)
-            // ship commands to GPU
-            commandBuffer.commit()
+            commandEncoder.setVertexBuffer(vertexBuffer.buffer, offset: vertexBuffer.offset, index: 0)
+
+            for submesh in mesh.submeshes {
+                commandEncoder.draw(submesh: submesh)
+            }
         }
+        // tell encoder we will not be drawing any more things
+        commandEncoder.endEncoding()
+        // callback to present the result
+        commandBuffer.present(drawable)
+        // ship commands to GPU
+        commandBuffer.commit()
     }
 }
 

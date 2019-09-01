@@ -16,6 +16,7 @@ class ViewController: NSViewController {
 
         self.mtkView = MTKView(frame: CGRect(), device: device)
         mtkView.colorPixelFormat = .bgra8Unorm
+        mtkView.depthStencilPixelFormat = .depth32Float
         self.renderer = Renderer(view: mtkView)
         mtkView.delegate = renderer
         super.init(nibName: nil, bundle: nil)
