@@ -49,21 +49,26 @@ vertex VertexOut vertex_main(
     return out;
 }
 
-constant float3 ambientIntensity = 0.1;
+constant float3 ambientIntensity = 0.2;
 constant float3 lightPosition(2, 2, 2); // Light position in world space
 constant float3 lightColor(1, 1, 1);
 constant float3 baseColor(1.0, 0, 0);
 constant float3 worldCameraPosition(0, 0, 2);
 constant float specularPower = 200;
 
-fragment float4 fragment_main(VertexOut fragmentIn [[stage_in]])
+fragment float4 fragment_main(VertexOut fragmentIn [[stage_in]],
+                              texture2d<float, access::sample> baseColorTexture [[texture(0)]],
+                              sampler baseColorSampler [[sampler(0)]])
 {
+    // color from texture (jpg)
+    float3 color = baseColorTexture.sample(baseColorSampler, fragmentIn.textCoords).rgb;
+    
     //return float4(1, 0, 0, 1);
     //float3 normal = normalize(fragmentIn.eyeNormal.xyz);
     //return float4(abs(normal), 1);
     
-    float3 normal = normalize(fragmentIn.worldNormal.xyz);
-    float3 color = abs(normal);
+//    float3 normal = normalize(fragmentIn.worldNormal.xyz);
+//    float3 color = abs(normal);
     
     float3 N = normalize(fragmentIn.worldNormal.xyz);
     float3 L = normalize(lightPosition - fragmentIn.worldPosition.xyz);

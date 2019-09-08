@@ -12,13 +12,19 @@ struct Uniforms {
 class Renderer: NSObject, MTKViewDelegate  {
 
     private let mtkView: MTKView
-    private let device: MTLDevice
+    private let device: MTLDevice // GPU
     private let commandQueue: MTLCommandQueue
+
     private let vertexDescriptor: MDLVertexDescriptor
     private let renderPipeline: MTLRenderPipelineState
     private let depthStencilState: MTLDepthStencilState
     private var meshes: [MTKMesh] = []
     var time: Float = 0
+
+    // Colors / texture
+    private let baseColorTexture: MTLTexture
+    private let samplerState: MTLSamplerState
+
 
     init(view: MTKView){
         self.mtkView = view
@@ -27,10 +33,34 @@ class Renderer: NSObject, MTKViewDelegate  {
         vertexDescriptor = Renderer.createVertexDescriptor()
         renderPipeline = Renderer.buildPipeline(device: device, view: view, vertexDescriptor: vertexDescriptor)
         meshes = Renderer.loadResources(device: device, vertexDescriptor: vertexDescriptor)
+        baseColorTexture = Renderer.loadTexture(device: device)
         depthStencilState = Renderer.createDepthStencilState(device: device)
+        samplerState = Renderer.createSamplerState(device: device)
         super.init()
     }
 
+    private class func createSamplerState(device: MTLDevice) -> MTLSamplerState {
+        let samplerDescriptor = MTLSamplerDescriptor()
+        samplerDescriptor.normalizedCoordinates = true
+        samplerDescriptor.minFilter = .linear
+        samplerDescriptor.magFilter = .linear
+        samplerDescriptor.mipFilter = .linear
+        guard let samplerState = device.makeSamplerState(descriptor: samplerDescriptor) else {
+            fatalError("Could not make sampler state")
+        }
+        return samplerState
+    }
+
+    private class func loadTexture(device: MTLDevice) -> MTLTexture {
+        let textureLoader = MTKTextureLoader(device: device)
+        let options: [MTKTextureLoader.Option: Any] = [.generateMipmaps: true, .SRGB: true]
+        do {
+            return try textureLoader.newTexture(name: "tiles_baseColor", scaleFactor: 1.0, bundle: nil, options: options)
+        }
+        catch {
+            fatalError("Could not load texture: \(error)")
+        }
+    }
 
     private static func createDepthStencilState(device: MTLDevice) -> MTLDepthStencilState {
         let depthStencilDescriptor = MTLDepthStencilDescriptor()
@@ -79,6 +109,8 @@ class Renderer: NSObject, MTKViewDelegate  {
     private static func loadResources(device: MTLDevice, vertexDescriptor: MDLVertexDescriptor) -> [MTKMesh] {
         let modelURL = Bundle.main.url(forResource: "teapot", withExtension: "obj")
 
+
+
         let bufferAllocator = MTKMeshBufferAllocator(device: device)
         let asset = MDLAsset(url: modelURL, vertexDescriptor: vertexDescriptor, bufferAllocator: bufferAllocator)
         do {
@@ -125,6 +157,8 @@ class Renderer: NSObject, MTKViewDelegate  {
         commandEncoder.setRenderPipelineState(renderPipeline)
         commandEncoder.setDepthStencilState(depthStencilState)
         commandEncoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+        commandEncoder.setFragmentTexture(baseColorTexture, index: 0)
+        commandEncoder.setFragmentSamplerState(samplerState, index: 0)
 
         for mesh in meshes {
             guard let vertexBuffer = mesh.vertexBuffers.first else {
